@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Metro Bus Tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #1a1a2e;
+    }
+
+    /* ── HEADER ── */
+    #header {
+      background: #0072CE;
+      color: #fff;
+      padding: 8px 12px 6px;
+      flex-shrink: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    #header-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    #route-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #route-number {
+      background: #fff;
+      color: #0072CE;
+      font-weight: 900;
+      font-size: 1.15rem;
+      padding: 2px 9px;
+      border-radius: 5px;
+      letter-spacing: 0.5px;
+      line-height: 1.5;
+    }
+
+    #route-name {
+      font-size: 0.72rem;
+      opacity: 0.85;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    #direction-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    #direction-label {
+      font-size: 0.88rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    #direction-toggle {
+      background: rgba(255,255,255,0.18);
+      border: 1.5px solid rgba(255,255,255,0.55);
+      color: #fff;
+      padding: 4px 11px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: background 0.15s;
+      flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #direction-toggle:hover,
+    #direction-toggle:active {
+      background: rgba(255,255,255,0.32);
+    }
+
+    #status-bar {
+      margin-top: 5px;
+      font-size: 0.7rem;
+      opacity: 0.85;
+      min-height: 1em;
+    }
+
+    #last-updated.stale {
+      opacity: 1;
+      color: #FFE066;
+      font-weight: 600;
+    }
+
+    /* ── MAP ── */
+    #map {
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── STOP MARKERS ── */
+    .stop-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2.5px solid #0072CE;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+    }
+
+    /* ── BUS MARKERS ── */
+    .bus-dot {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: #E16710;
+      border: 2.5px solid #fff;
+      box-shadow: 0 2px 7px rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      line-height: 1;
+      transform-origin: center center;
+      position: relative;
+    }
+
+    /* Direction arrow on bus */
+    .bus-dot::after {
+      content: '';
+      position: absolute;
+      top: -6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-bottom: 6px solid #E16710;
+    }
+
+    /* ── POPUPS ── */
+    .pop { min-width: 140px; }
+    .pop strong { font-size: 0.9rem; display: block; margin-bottom: 4px; color: #111; }
+    .pop-label { font-size: 0.72rem; color: #666; margin-bottom: 4px; }
+    .arr-list { list-style: none; }
+    .arr-time {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #0072CE;
+      padding: 2px 0;
+    }
+    .arr-none { font-size: 0.8rem; color: #999; font-style: italic; }
+
+    /* ── LOADING OVERLAY ── */
+    #loading {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      pointer-events: none;
+    }
+    #loading.hidden { display: none; }
+
+    /* Leaflet popup tweaks for mobile */
+    .leaflet-popup-content-wrapper {
+      border-radius: 10px;
+      box-shadow: 0 3px 14px rgba(0,0,0,0.3);
+    }
+    .leaflet-popup-content { margin: 12px 14px; }
+  </style>
+</head>
+<body>
+
+  <header id="header">
+    <div id="header-top">
+      <div id="route-badge">
+        <span id="route-number">…</span>
+        <span id="route-name">Metro Bus Tracker</span>
+      </div>
+      <div id="direction-section">
+        <span id="direction-label">Loading…</span>
+        <button id="direction-toggle" aria-label="Switch direction" disabled>⇅</button>
+      </div>
+    </div>
+    <div id="status-bar">
+      <span id="last-updated">Loading route data…</span>
+    </div>
+  </header>
+
+  <div id="map"></div>
+
+  <div id="loading">Loading route 207…</div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+  // ─────────────────────────────────────────────────────────────
+  // CONFIG
+  // ─────────────────────────────────────────────────────────────
+  const CONFIG = {
+    routeCode:   new URLSearchParams(location.search).get('route') || '207',
+    agencyId:    'LACMTA',
+    apiBase:     'https://api.metro.net',
+    wsBase:      'wss://api.metro.net/ws',
+    staleMs:     2 * 60 * 1000,   // 2 minutes → stale warning
+    routeColor:  '#E16710',        // Metro orange for route polyline
+    mapCenter:   [34.017, -118.309],
+    mapZoom:     12,
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────────
+  const state = {
+    direction:        0,          // 0 = Northbound, 1 = Southbound
+    routeInfo:        null,
+    stopsAll:         [],         // raw array from route_stops API
+    dayType:          getDayType(),
+    vehicles:         new Map(),  // vehicleId → raw WS message
+    lastUpdatedTime:  null,
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // MAP
+  // ─────────────────────────────────────────────────────────────
+  const map = L.map('map', {
+    center:      CONFIG.mapCenter,
+    zoom:        CONFIG.mapZoom,
+    zoomControl: true,
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+  }).addTo(map);
+
+  const routeLayer   = L.featureGroup().addTo(map);
+  const stopsLayer   = L.featureGroup().addTo(map);
+  const vehicleLayer = L.featureGroup().addTo(map);
+  const vehicleMarkers = new Map(); // vehicleId → L.Marker
+
+  // ─────────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────────
+  function getDayType() {
+    const d = new Date().getDay();
+    if (d === 0) return 'sunday';
+    if (d === 6) return 'saturday';
+    return 'weekday';
+  }
+
+  // departure_times is a Python-list string: "['04:53:00', '04:56:00', ...]"
+  // Extract all HH:MM:SS strings with regex — robust to Python vs JSON formatting
+  function parseDepartureTimes(str) {
+    return str.match(/\d+:\d+:\d+/g) || [];
+  }
+
+  function timeToMinutes(timeStr) {
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  // totalMins may exceed 1440 for after-midnight trips (e.g. 25:10 → 1:10 AM)
+  function minutesToDisplay(totalMins) {
+    const h = Math.floor(totalMins / 60) % 24;
+    const m = totalMins % 60;
+    const period = h >= 12 ? 'PM' : 'AM';
+    const displayH  = h % 12 || 12;
+    return `${displayH}:${String(m).padStart(2, '0')} ${period}`;
+  }
+
+  function getNextArrivals(departureTimes, count = 4) {
+    const now = new Date();
+    const nowMins = now.getHours() * 60 + now.getMinutes();
+    // Deduplicate and sort ascending
+    const allMins = [...new Set(departureTimes.map(timeToMinutes))].sort((a, b) => a - b);
+    const upcoming = allMins.filter(m => m >= nowMins);
+    return upcoming.slice(0, count).map(minutesToDisplay);
+  }
+
+  function getDirectionStops() {
+    return state.stopsAll
+      .filter(s => s.direction_id === state.direction && s.day_type === state.dayType)
+      .sort((a, b) => a.stop_sequence - b.stop_sequence);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // ICONS
+  // ─────────────────────────────────────────────────────────────
+  const stopIcon = L.divIcon({
+    html:        '<div class="stop-dot"></div>',
+    className:   '',
+    iconSize:    [10, 10],
+    iconAnchor:  [5, 5],
+    popupAnchor: [0, -10],
+  });
+
+  function makeBusIcon(bearing) {
+    // Rotate the entire marker div; the ::after arrow always points "up" in CSS
+    // so rotating the container makes the arrow point toward bearing
+    return L.divIcon({
+      html:        `<div class="bus-dot" style="transform:rotate(${bearing || 0}deg)"></div>`,
+      className:   '',
+      iconSize:    [26, 26],
+      iconAnchor:  [13, 13],
+      popupAnchor: [0, -16],
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // RENDER — ROUTE LINE
+  // ─────────────────────────────────────────────────────────────
+  function renderRoute() {
+    routeLayer.clearLayers();
+    const stops = getDirectionStops();
+    if (!stops.length) return;
+    const latlngs = stops.map(s => [s.geometry.coordinates[1], s.geometry.coordinates[0]]);
+    L.polyline(latlngs, {
+      color:   CONFIG.routeColor,
+      weight:  4,
+      opacity: 0.8,
+    }).addTo(routeLayer);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // RENDER — STOPS
+  // ─────────────────────────────────────────────────────────────
+  function renderStops() {
+    stopsLayer.clearLayers();
+    const stops = getDirectionStops();
+
+    stops.forEach(stop => {
+      const [lng, lat] = stop.geometry.coordinates;
+      const times = parseDepartureTimes(stop.departure_times);
+
+      L.marker([lat, lng], { icon: stopIcon })
+        .bindPopup(() => {
+          const next = getNextArrivals(times);
+          const timesHtml = next.length
+            ? next.map(t => `<li class="arr-time">${t}</li>`).join('')
+            : '<li class="arr-none">No more scheduled arrivals today</li>';
+          return `
+            <div class="pop">
+              <strong>${stop.stop_name}</strong>
+              <p class="pop-label">Scheduled arrivals:</p>
+              <ul class="arr-list">${timesHtml}</ul>
+            </div>`;
+        }, { maxWidth: 220 })
+        .addTo(stopsLayer);
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // RENDER — VEHICLES (incremental updates to avoid flicker)
+  // ─────────────────────────────────────────────────────────────
+  function updateVehicleMarker(vehicleId, data) {
+    const dirId = data.vehicle?.trip?.directionId;
+    const pos   = data.vehicle?.position;
+
+    // Remove if wrong direction or missing position
+    if (dirId !== state.direction || !pos?.latitude || !pos?.longitude) {
+      if (vehicleMarkers.has(vehicleId)) {
+        vehicleMarkers.get(vehicleId).remove();
+        vehicleMarkers.delete(vehicleId);
+      }
+      return;
+    }
+
+    const { latitude: lat, longitude: lng, bearing } = pos;
+    const label  = data.vehicle?.vehicle?.label || vehicleId;
+    const status = (data.vehicle?.currentStatus || '').replace(/_/g, ' ');
+    const icon   = makeBusIcon(bearing);
+
+    if (vehicleMarkers.has(vehicleId)) {
+      const marker = vehicleMarkers.get(vehicleId);
+      marker.setLatLng([lat, lng]);
+      marker.setIcon(icon);
+    } else {
+      const popupHtml = `
+        <div class="pop">
+          <strong>Bus ${label}</strong>
+          <p>${status || 'En route'}</p>
+        </div>`;
+      const marker = L.marker([lat, lng], { icon, zIndexOffset: 1000 })
+        .bindPopup(popupHtml)
+        .addTo(vehicleLayer);
+      vehicleMarkers.set(vehicleId, marker);
+    }
+  }
+
+  // Full refresh — called after direction switch or reconnect
+  function refreshAllVehicles() {
+    vehicleMarkers.forEach(m => m.remove());
+    vehicleMarkers.clear();
+    state.vehicles.forEach((data, id) => updateVehicleMarker(id, data));
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // STATUS BAR
+  // ─────────────────────────────────────────────────────────────
+  function updateStatus() {
+    const el = document.getElementById('last-updated');
+    if (!state.lastUpdatedTime) {
+      el.textContent = 'Waiting for live bus data…';
+      el.className   = '';
+      return;
+    }
+    const ago = Date.now() - state.lastUpdatedTime.getTime();
+    const t   = state.lastUpdatedTime.toLocaleTimeString([], {
+      hour: 'numeric', minute: '2-digit', second: '2-digit',
+    });
+    if (ago > CONFIG.staleMs) {
+      el.textContent = `⚠️ Data may be stale — last received: ${t}`;
+      el.className   = 'stale';
+    } else {
+      el.textContent = `Bus positions last updated: ${t}`;
+      el.className   = '';
+    }
+  }
+
+  function updateDirectionUI() {
+    if (!state.routeInfo) return;
+    const info  = state.routeInfo;
+    const dir   = state.direction;
+    const label = dir === 0
+      ? `${info.travel_direction_0} to ${info.terminal_2}`
+      : `${info.travel_direction_1} to ${info.terminal_1}`;
+    const toggleLabel = dir === 0 ? info.travel_direction_1 : info.travel_direction_0;
+    document.getElementById('direction-label').textContent  = label;
+    document.getElementById('direction-toggle').textContent = `⇅ ${toggleLabel}`;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // WEBSOCKET
+  // ─────────────────────────────────────────────────────────────
+  let ws            = null;
+  let wsRetryTimer  = null;
+
+  function connectWebSocket() {
+    if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+    const url = `${CONFIG.wsBase}/${CONFIG.agencyId}/vehicle_positions/${CONFIG.routeCode}`;
+    console.log('[WS] Connecting:', url);
+
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      console.log('[WS] Connected');
+    };
+
+    ws.onmessage = ({ data }) => {
+      try {
+        const msg = JSON.parse(data);
+        if (msg.id && msg.vehicle) {
+          state.vehicles.set(msg.id, msg);
+          state.lastUpdatedTime = new Date();
+          updateVehicleMarker(msg.id, msg);
+          updateStatus();
+        }
+      } catch (e) {
+        console.warn('[WS] Parse error:', e);
+      }
+    };
+
+    ws.onerror = () => console.warn('[WS] Error');
+
+    ws.onclose = () => {
+      console.log('[WS] Closed — retrying in 5s');
+      ws = null;
+      wsRetryTimer = setTimeout(connectWebSocket, 5000);
+    };
+  }
+
+  function disconnectWebSocket() {
+    clearTimeout(wsRetryTimer);
+    wsRetryTimer = null;
+    if (ws) {
+      ws.onclose = null; // suppress auto-retry
+      ws.close();
+      ws = null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // PAGE VISIBILITY — auto-reconnect on return
+  // ─────────────────────────────────────────────────────────────
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      disconnectWebSocket();
+    } else {
+      // Clear stale vehicle data and reconnect
+      state.vehicles.clear();
+      refreshAllVehicles();
+      state.lastUpdatedTime = null;
+      updateStatus();
+      connectWebSocket();
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // API CALLS
+  // ─────────────────────────────────────────────────────────────
+  async function fetchRouteInfo() {
+    const res = await fetch(`${CONFIG.apiBase}/${CONFIG.agencyId}/route_overview/${CONFIG.routeCode}`);
+    if (!res.ok) throw new Error(`route_overview HTTP ${res.status}`);
+    const data = await res.json();
+    return data[0];
+  }
+
+  async function fetchStops() {
+    const res = await fetch(`${CONFIG.apiBase}/${CONFIG.agencyId}/route_stops/${CONFIG.routeCode}`);
+    if (!res.ok) throw new Error(`route_stops HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // DIRECTION TOGGLE
+  // ─────────────────────────────────────────────────────────────
+  document.getElementById('direction-toggle').addEventListener('click', () => {
+    state.direction = state.direction === 0 ? 1 : 0;
+    updateDirectionUI();
+    renderRoute();
+    renderStops();
+    refreshAllVehicles();
+    if (routeLayer.getBounds().isValid()) {
+      map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // INIT
+  // ─────────────────────────────────────────────────────────────
+  async function init() {
+    try {
+      const [routeInfo, stops] = await Promise.all([fetchRouteInfo(), fetchStops()]);
+
+      state.routeInfo = routeInfo;
+      state.stopsAll  = stops;
+
+      // Update page header
+      document.title = `Route ${CONFIG.routeCode} · Metro Bus Tracker`;
+      document.getElementById('route-number').textContent = CONFIG.routeCode;
+      document.getElementById('route-name').textContent   =
+        routeInfo.route_long_name || 'Metro Local Line';
+      document.getElementById('direction-toggle').disabled = false;
+
+      updateDirectionUI();
+      renderRoute();
+      renderStops();
+
+      // Fit map to show the whole route
+      if (routeLayer.getBounds().isValid()) {
+        map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+      }
+
+      // Hide loading overlay
+      document.getElementById('loading').classList.add('hidden');
+
+      // Start live data
+      updateStatus();
+      connectWebSocket();
+
+      // Periodic stale-check even when no new messages
+      setInterval(updateStatus, 15000);
+
+    } catch (err) {
+      console.error('[init]', err);
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('last-updated').textContent =
+        `⚠️ Error loading route data: ${err.message}`;
+    }
+  }
+
+  init();
+  </script>
+</body>
+</html>
